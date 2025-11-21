@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import math
 import random
-import ast
 from typing import Callable
 
 
@@ -57,8 +57,9 @@ class _SafeExpressionEvaluator(ast.NodeVisitor):
         ast.FloorDiv,
     )
 
-    def __init__(self) -> None:
+    def __init__(self, allowed_variables: set[str]) -> None:
         self.names: set[str] = set()
+        self.allowed_variables = allowed_variables
 
     def visit(self, node):  # type: ignore[override]
         if not isinstance(node, self.allowed_nodes):
@@ -66,8 +67,11 @@ class _SafeExpressionEvaluator(ast.NodeVisitor):
         return super().visit(node)
 
     def visit_Name(self, node: ast.Name):
-        if node.id != "s" and node.id not in _ALLOWED_NAMES:
-            raise ValueError(f"Only variable 's' and math functions are allowed, got {node.id!r}")
+        if node.id not in self.allowed_variables and node.id not in _ALLOWED_NAMES:
+            raise ValueError(
+                "Only payoff variables and math functions are allowed, got "
+                f"{node.id!r}."
+            )
         self.names.add(node.id)
 
     def visit_Call(self, node: ast.Call):
@@ -79,24 +83,41 @@ class _SafeExpressionEvaluator(ast.NodeVisitor):
             self.visit(keyword.value)
 
 
-def compile_payoff(expression: str) -> Callable[[float], float]:
+def compile_payoff(
+    expression: str,
+    *,
+    variables: set[str] | None = None,
+    context: dict[str, float] | None = None,
+) -> Callable[[float], float]:
     """Compile a payoff expression into a callable.
 
-    The expression should be a valid Python arithmetic expression in terms of the
-    variable `s`, representing the terminal asset price. For example:
+    The expression should be a valid Python arithmetic expression that uses the
+    terminal price variable (``s`` by default). Provide ``variables`` to allow
+    multiple aliases (e.g., ``{"s", "ST", "S_T"}``) and ``context`` to inject
+    constants such as strikes or barriers.
+
+    Examples:
 
     * ``max(s - 100, 0)`` for a call option with strike 100
     * ``max(100 - s, 0)`` for a put option with strike 100
+    * ``min(max(S_T - K, 0), cap)`` with variables ``{"S_T"}`` and context
+      containing ``K`` and ``cap``
 
     Math helpers from :mod:`math` such as ``exp`` and ``sqrt`` are available.
     """
 
+    payoff_variables = variables or {"s"}
+    static_context = context or {}
+    allowed_variables = payoff_variables | set(static_context)
     tree = ast.parse(expression, mode="eval")
-    _SafeExpressionEvaluator().visit(tree)
+    _SafeExpressionEvaluator(allowed_variables).visit(tree)
     compiled = compile(tree, filename="<payoff>", mode="eval")
 
     def payoff(s: float) -> float:
-        return float(eval(compiled, {"__builtins__": {}}, {"s": s, **_ALLOWED_NAMES}))
+        payoff_scope = {name: s for name in payoff_variables}
+        payoff_scope.update(static_context)
+        payoff_scope.update(_ALLOWED_NAMES)
+        return float(eval(compiled, {"__builtins__": {}}, payoff_scope))
 
     return payoff
 
