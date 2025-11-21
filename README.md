@@ -20,9 +20,11 @@ python monte_carlo_option_pricing.py --spot 100 --rate 0.05 --volatility 0.2 \
     --maturity 1.0
 ```
 
-You will be prompted to enter a payoff expression in terms of the terminal price
-`s` (for example, `max(s - 100, 0)` for a call or `max(100 - s, 0)` for a put).
-If you prefer to skip the prompt, pass the payoff directly:
+By default you will be prompted to enter a payoff expression in terms of the
+terminal price `s` (for example, `max(s - 100, 0)` for a call or `max(100 - s,
+0)` for a put).
+
+To skip the prompt, pass the payoff directly:
 
 ```bash
 python monte_carlo_option_pricing.py --spot 100 --rate 0.05 --volatility 0.2 \
